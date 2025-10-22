@@ -1,0 +1,41 @@
+/* Styles for CreateInterview form — matches site dark theme */
+:root{
+  --form-bg: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+}
+.create-wrap{background:transparent;padding:24px; width: 400px;border-radius:12px}
+.create-card{background:var(--surface);padding:20px;border-radius:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:var(--shadow)}
+.create-grid{display:grid;gap:12px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{color:var(--muted);font-size:13px}
+.field select,.field input{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px 10px;border-radius:8px;color:var(--text)}
+.field select:focus,.field input:focus{outline:3px solid rgba(37,99,235,0.12);outline-offset:2px}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
+.muted-note{color:var(--muted);font-size:13px}
+.small{font-size:13px}
+.back-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:8px 12px;border-radius:8px}
+.primary-btn{background:linear-gradient(90deg,var(--accent),var(--accent-600));color:white;padding:8px 12px;border-radius:8px;border:0}
+
+/* Make native dropdown options match the dark theme where possible */
+.field select, .field select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Remove native arrow on some browsers and provide spacing for our custom arrow */
+.field select{
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 36px; /* room for arrow */
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% - 2px), calc(100% - 13px) calc(50% - 2px);
+  background-size: 6px 6px,6px 6px;
+  background-repeat: no-repeat;
+}
+
+/* IE/Edge old engine: hide default arrow */
+.field select::-ms-expand{ display:none }
+
+/* Note: some OS/browser combinations render the dropdown menu using native UI (system white background).
+   If you need fully consistent dark dropdowns across all platforms, consider replacing <select>
+   with a custom popover/list component (e.g., headless UI, Radix UI, or a small custom implementation). */
