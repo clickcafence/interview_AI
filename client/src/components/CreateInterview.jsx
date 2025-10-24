@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import '../styles/create.css'
 
-export default function CreateInterview({ onBack, onCreate }) {
+export default function CreateInterview({ onBack, onCreate, loading = false }) {
   const [language, setLanguage] = useState('')
   const [role, setRole] = useState('frontend')
   const [framework, setFramework] = useState('')
@@ -92,8 +92,15 @@ export default function CreateInterview({ onBack, onCreate }) {
           </div>
 
           <div className="actions">
-            <button type="button" onClick={onBack} className="back-btn">Back</button>
-            <button type="submit" className="primary-btn">Generate Questions</button>
+            <button type="button" onClick={onBack} className="back-btn" disabled={loading}>Back</button>
+            <button type="submit" className="primary-btn" disabled={loading}>
+              {loading ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span className="spinner" style={{ width: 14, height: 14 }}></span>
+                  Generating...
+                </span>
+              ) : 'Generate Questions'}
+            </button>
           </div>
         </form>
       </div>

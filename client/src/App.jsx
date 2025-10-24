@@ -4,18 +4,21 @@ import Home from './components/Home'
 import CreateInterview from './components/CreateInterview'
 import QuestionSession from './components/QuestionSession'
 import ResultSummary from './components/ResultSummary'
-import { generateQuestions } from './lib/aiClient'
+import { generateQuestions, gradeCoding } from './lib/aiClient'
 
 function App() {
   const [screen, setScreen] = useState('home') // home | create | session | result
   const [session, setSession] = useState(null)
   const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(false)
 
   async function handleCreate(config) {
     setError(null)
+    setLoading(true)
     try {
       // Generate questions (mock or real depending on config)
       const result = await generateQuestions(config)
+      setLoading(false)
       console.log('Generated questions result:', result)
       const questions = Array.isArray(result) ? result : result.questions
       const assistant = result && result.assistant ? result.assistant : null
@@ -27,14 +30,42 @@ function App() {
       setScreen('session')
     } catch (err) {
       console.error('Error generating questions', err)
+      setLoading(false)
       setError(err.message || String(err))
     }
   }
 
   function handleFinish(answers) {
-    // compute results here or in ResultSummary
-    setSession((s) => ({ ...s, answers }))
-    setScreen('result')
+    // For coding answers, optionally call AI grader and attach feedback before showing results
+    (async () => {
+      try {
+        const s = session
+        const questions = s.questions || []
+        const updatedAnswers = answers || []
+        // find coding questions and grade them
+        for (const q of questions) {
+          if (q.type === 'coding' || q.type === 'code') {
+            const userCode = (answers || []).find((a) => a.id === q.id)?.answer
+            if (userCode) {
+              try {
+                const grade = await gradeCoding(q, userCode)
+                // attach grade into answers list as metadata
+                const idx = updatedAnswers.findIndex((a) => a.id === q.id)
+                if (idx !== -1) updatedAnswers[idx] = { ...updatedAnswers[idx], grade }
+              } catch (e) {
+                console.warn('grading failed for question', q.id, e)
+              }
+            }
+          }
+        }
+        setSession((s) => ({ ...s, answers: updatedAnswers }))
+        setScreen('result')
+      } catch (e) {
+        console.error('Error while grading coding answers', e)
+        setSession((s) => ({ ...s, answers }))
+        setScreen('result')
+      }
+    })()
   }
 
   function handleRestart() {
@@ -52,6 +83,7 @@ function App() {
         <CreateInterview
           onBack={() => setScreen('home')}
           onCreate={handleCreate}
+          loading={loading}
         />
       )}
 

@@ -77,7 +77,7 @@ async function callOpenAIChat({ messages = [], model = DEFAULT_MODEL, temperatur
  * - question (for MC), options (array), correctIndex (number)
  * - prompt (for coding), referenceSolution (string)
  */
-export async function generateQuestions({ language = 'javascript', topic = 'algorithms', count = 10, difficulty = 'medium', role = undefined, framework = undefined, useModel } = {}) {
+export async function generateQuestions({ language = 'javascript', topic = 'algorithms', count = 10, difficulty = 'medium', useModel } = {}) {
   if (USE_MOCK) return generateMockQuestions({ language, topic, count });
 
   // If backend proxy is configured, call it
@@ -86,7 +86,7 @@ export async function generateQuestions({ language = 'javascript', topic = 'algo
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language, topic, count, difficulty, role, framework }),
+      body: JSON.stringify({ language, topic, count, difficulty }),
     });
     if (!res.ok) throw new Error(`Backend proxy error: ${res.status}`);
     const j = await res.json();
@@ -192,6 +192,33 @@ export async function gradeCodingWithAI(question, userCode, { model } = {}) {
     }
     throw new Error('Failed to parse AI grader response: ' + err.message + '\nResponse:\n' + text);
   }
+}
+
+/**
+ * gradeCoding(question, userCode)
+ * Prefer calling the backend proxy if configured (so API key stays server-side).
+ * Fallback to gradeCodingWithAI (client-side) if no backend is configured.
+ */
+export async function gradeCoding(question, userCode, opts = {}) {
+  if (BACKEND_URL) {
+    const url = `${BACKEND_URL.replace(/\/$/, '')}/api/grade-code`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, userCode }),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Backend grade-code error ${res.status}: ${txt}`);
+    }
+    const j = await res.json();
+    // backend returns { ok: true, data: {...} } or similar; normalize
+    if (j && j.data) return j.data;
+    return j;
+  }
+
+  // fallback: call client-side AI grader (requires OPENAI_KEY)
+  return gradeCodingWithAI(question, userCode, opts);
 }
 
 export const isMock = () => USE_MOCK;

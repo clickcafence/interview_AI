@@ -63,3 +63,15 @@ body{background:var(--bg);color:var(--text);margin:0;font-family:Inter, system-u
 @media (max-width:900px){
   .features{grid-template-columns:1fr}
 }
+
+/* small spinner used in buttons */
+.spinner{
+  display:inline-block;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,0.12);
+  border-top-color: var(--accent);
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}

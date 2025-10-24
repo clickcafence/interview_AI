@@ -2,6 +2,7 @@
 :root{
   --form-bg: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
 }
+body{background:var(--bg); height:auto;color:var(--text);font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}  
 .create-wrap{background:transparent;padding:24px; width: 400px;border-radius:12px}
 .create-card{background:var(--surface);padding:20px;border-radius:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:var(--shadow)}
 .create-grid{display:grid;gap:12px}

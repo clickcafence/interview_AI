@@ -102,3 +102,29 @@ export async function generateQuestions({ language = 'javascript', numQuestions 
   // No backend and not mock: throw (we don't call OpenAI directly from this module in this variant)
   throw new Error('No backend proxy configured and mock mode disabled. Set VITE_BACKEND_URL or VITE_USE_MOCK_AI=true')
 }
+
+/**
+ * gradeCoding(question, userCode)
+ * Prefer calling the backend proxy if configured; otherwise fall back to a simple heuristic.
+ */
+export async function gradeCoding(question, userCode) {
+  if (BACKEND_URL) {
+    const url = `${BACKEND_URL.replace(/\/$/, '')}/api/grade-code`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, userCode }),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Backend grade-code error ${res.status}: ${txt}`);
+    }
+    const j = await res.json();
+    if (j && j.data) return j.data;
+    return j;
+  }
+
+  // simple heuristic fallback
+  const pass = userCode && userCode.length > 20;
+  return { score: pass ? 90 : 30, verdict: pass ? 'pass' : 'fail', feedback: pass ? 'Solution looks reasonable (heuristic).' : 'Solution too short (heuristic).' };
+}
