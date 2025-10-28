@@ -11,26 +11,38 @@ function nextId() {
 const USE_MOCK = import.meta && import.meta.env && import.meta.env.VITE_USE_MOCK_AI === 'true'
 const BACKEND_URL = import.meta && import.meta.env && import.meta.env.VITE_BACKEND_URL
 
-function normalizeQuestion(raw, languageFallback = 'javascript') {
-  // raw may come in different shapes; normalize to { id, type: 'mcq'|'code', prompt, choices, correctIndex, sampleAnswer }
+function normalizeQuestion(raw) {
+  // Strict normalization: only accept complete items, otherwise return null
   const type = (raw.type || raw.questionType || raw.qtype || '').toString().toLowerCase()
-  if (type.includes('multiple') || type.includes('mcq') || raw.options || raw.choices) {
+  const isMcq = type.includes('multiple') || type.includes('mcq') || !!raw.options || !!raw.choices
+  if (isMcq) {
+    const prompt = raw.question || raw.prompt
+    const choices = raw.options || raw.choices
+    const ci = raw.correctIndex
+    if (!prompt || !Array.isArray(choices) || choices.length < 2 || !Number.isInteger(ci) || ci < 0 || ci >= choices.length) return null
     return {
       id: raw.id || nextId(),
       type: 'mcq',
-      prompt: raw.question || raw.prompt || `Untitled question (${languageFallback})`,
-      choices: raw.options || raw.choices || [],
-      correctIndex: typeof raw.correctIndex !== 'undefined' ? raw.correctIndex : null,
+      prompt,
+      choices,
+      correctIndex: ci,
     }
   }
 
   // coding / code
-  return {
-    id: raw.id || nextId(),
-    type: 'code',
-    prompt: raw.prompt || raw.question || `Coding task (${languageFallback})`,
-    sampleAnswer: raw.referenceSolution || raw.sampleAnswer || raw.answer || '',
+  const isCode = type === 'code' || type === 'coding' || (!!raw.prompt && !isMcq)
+  if (isCode) {
+    const prompt = raw.prompt || raw.question
+    const sample = raw.referenceSolution || raw.sampleAnswer || raw.answer
+    if (!prompt || !sample) return null
+    return {
+      id: raw.id || nextId(),
+      type: 'code',
+      prompt,
+      sampleAnswer: sample,
+    }
   }
+  return null
 }
 
 export async function generateQuestions({ language = 'javascript', numQuestions = 5, role = undefined, framework = undefined } = {}) {
@@ -78,9 +90,11 @@ export async function generateQuestions({ language = 'javascript', numQuestions 
   const data = j && j.data ? j.data : j
   const assistant = j && j.assistant ? j.assistant : null
   let raws = []
-    if (data.questions && Array.isArray(data.questions)) raws = data.questions
-    else if (Array.isArray(data)) raws = data
-    else if (data.raw && typeof data.raw === 'string') {
+    if (data.questions && Array.isArray(data.questions)) {
+      raws = data.questions
+    } else if (Array.isArray(data)) {
+      raws = data
+    } else if (data.raw && typeof data.raw === 'string') {
       // try to parse embedded JSON from AI raw text
       try {
         const first = data.raw.indexOf('{')
@@ -88,14 +102,36 @@ export async function generateQuestions({ language = 'javascript', numQuestions 
         if (first !== -1 && last !== -1) {
           const slice = data.raw.slice(first, last + 1)
           const parsed = JSON.parse(slice)
-          raws = parsed.questions || []
+          if (parsed && Array.isArray(parsed.questions)) raws = parsed.questions
         }
       } catch {
         // ignore
       }
     }
 
-    const questions = raws.map((r) => normalizeQuestion(r, language))
+    // Fallback: try to parse the assistant content if still empty
+    if ((!raws || raws.length === 0) && typeof assistant === 'string') {
+      try {
+        // Try direct parse
+        const parsedA = JSON.parse(assistant)
+        if (parsedA && Array.isArray(parsedA.questions)) raws = parsedA.questions
+      } catch {
+        // Try extracting JSON substring from assistant
+        try {
+          const first = assistant.indexOf('{')
+          const last = assistant.lastIndexOf('}')
+          if (first !== -1 && last !== -1) {
+            const slice = assistant.slice(first, last + 1)
+            const parsed = JSON.parse(slice)
+            if (parsed && Array.isArray(parsed.questions)) raws = parsed.questions
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+  const questions = (raws || []).map((r) => normalizeQuestion(r, language)).filter(Boolean)
     return { questions, assistant }
   }
 

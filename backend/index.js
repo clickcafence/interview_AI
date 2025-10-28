@@ -31,7 +31,12 @@ app.post('/api/generate-questions', async (req, res) => {
     if (!OPENAI_KEY) return res.status(500).json({ error: 'OpenAI key not configured on server' });
 
     // Stronger prompt: include role/framework, explicit example schema, and few-shot examples for Database/HTML/DevOps.
-    const system = `You are an assistant that generates programming interview questions and coding tasks tailored to a requested language, role, and framework. ALWAYS respond with valid JSON only (no commentary, no explanation). The top-level JSON must be: { "questions": [ ... ] }.`;
+  const system = `You are an assistant that generates programming interview questions and coding tasks tailored to a requested language, role, and framework.
+ALWAYS respond with valid JSON only (no commentary, no explanation). The top-level JSON must be: { "questions": [ ... ] }.
+LANGUAGE RULES:
+- All question stems and correct answers MUST align with the requested language.
+- For multiple-choice, wrong options MAY reference other languages as plausible distractors, but the stem and the correct option must still be in the target language.
+- For coding tasks, the prompt and referenceSolution MUST be written for the target language.`;
 
   const fewShotExamples = `\n\nEXAMPLES (JSON only):\n` +
   `1) Database (SQL) example A:\n` +
@@ -47,7 +52,8 @@ app.post('/api/generate-questions', async (req, res) => {
     const userPrompt = `Generate exactly ${count} interview questions focused on the language '${language}'${role ? `, role: '${role}'` : ''}${framework ? `, framework: '${framework}'` : ''}${topic ? `, topic: '${topic}'` : ''}.\n\n` +
       `STRONG REQUIREMENTS:\n` +
       `- Produce JSON only, with top-level { "questions": [...] } and nothing else. Do NOT include any explanation or extra text.\n` +
-      `- Questions MUST be relevant to the requested language and role. If language is 'html' or role is 'database', DO NOT include code snippets or questions about unrelated languages (for example: JavaScript, Python, Java) — use SQL for database tasks.\n` +
+  `- Questions MUST be relevant to the requested language and role. If language is 'html' or role is 'database', DO NOT include code snippets or questions about unrelated languages (for example: JavaScript, Python, Java) — use SQL for database tasks.\n` +
+  `- If language is 'javascript', do NOT output Python stems/solutions; if language is 'python', do NOT output JavaScript stems/solutions. MCQ wrong options may reference other languages but the stem and correct option must be in the target language.\n` +
       `- Mix multiple-choice (type: \"multiple_choice\") and coding/markup/SQL tasks (type: \"coding\").\n` +
       `- For multiple-choice, include: { \"type\": \"multiple_choice\", \"question\": string, \"options\": [strings], \"correctIndex\": number }\n` +
       `- For coding tasks, include: { \"type\": \"coding\", \"prompt\": string, \"referenceSolution\": string }\n\n` +
@@ -148,6 +154,77 @@ app.post('/api/generate-questions', async (req, res) => {
       return kept
     }
 
+    // Schema validation helpers
+    function isValidMcq(q) {
+      const stem = q.question || q.prompt
+      const options = q.options || q.choices
+      const ci = q.correctIndex
+      if (!stem || typeof stem !== 'string' || !Array.isArray(options) || options.length < 2) return false
+      return Number.isInteger(ci) && ci >= 0 && ci < options.length
+    }
+    function isValidCode(q) {
+      const stem = q.prompt || q.question
+      const ref = q.referenceSolution || q.sampleAnswer
+      if (!stem || typeof stem !== 'string' || stem.trim().length < 4) return false
+      if (!ref || typeof ref !== 'string' || ref.trim().length < 2) return false
+      return true
+    }
+    function filterValid(qs) {
+      const out = []
+      for (const q of qs || []) {
+        const t = (q.type || '').toString().toLowerCase()
+        if (t === 'multiple_choice' || t === 'mcq' || t === 'multiple-choice') {
+          if (isValidMcq(q)) out.push(q)
+        } else if (t === 'coding' || t === 'code') {
+          if (isValidCode(q)) out.push(q)
+        }
+      }
+      return out
+    }
+
+    async function topUpQuestions(remaining) {
+      if (remaining <= 0) return []
+      const strictPrompt = `Generate exactly ${remaining} interview questions for language '${language}'${role ? `, role: '${role}'` : ''}${framework ? `, framework: '${framework}'` : ''}.
+Requirements:
+- JSON only with top-level {"questions":[...]}; no extra text.
+- Include BOTH multiple_choice and coding types if possible.
+- MCQ must have: {type:"multiple_choice", question:string, options:[...], correctIndex:number} (no placeholders).
+- Coding must have: {type:"coding", prompt:string, referenceSolution:string} (no placeholders, not empty).
+- Stems and correct answers must be in ${language}. Wrong MCQ options can reference other languages.
+Return JSON only.`
+      const body2 = {
+        model: DEFAULT_MODEL,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: strictPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 1200,
+      }
+      const rr = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify(body2),
+      })
+      if (!rr.ok) return []
+      const d2 = await rr.json()
+      const c2 = d2.choices && d2.choices[0] && d2.choices[0].message ? d2.choices[0].message.content : null
+      try {
+        const p2 = JSON.parse(c2)
+        return (p2 && Array.isArray(p2.questions)) ? p2.questions : []
+      } catch {
+        try {
+          const first = c2 ? c2.indexOf('{') : -1
+          const last = c2 ? c2.lastIndexOf('}') : -1
+          if (first !== -1 && last !== -1) {
+            const p2 = JSON.parse(c2.slice(first, last + 1))
+            return (p2 && Array.isArray(p2.questions)) ? p2.questions : []
+          }
+        } catch {}
+      }
+      return []
+    }
+
     // If parsed contains questions and is an array, we'll attempt to dedupe and, if needed, run a second generation and merge.
     async function generateAndDedupe(attempts = 2) {
       let collected = []
@@ -189,7 +266,16 @@ app.post('/api/generate-questions', async (req, res) => {
     }
 
     const dedupedResult = await generateAndDedupe(2)
-    const uniqueQuestions = dedupedResult.unique || []
+    let uniqueQuestions = dedupedResult.unique || []
+    // filter incomplete/placeholder items
+    uniqueQuestions = filterValid(uniqueQuestions)
+    // top up if not enough
+    if (uniqueQuestions.length < count) {
+      const need = count - uniqueQuestions.length
+      const more = await topUpQuestions(need)
+      const merged = dedupeQuestions([...uniqueQuestions, ...more], count * 2)
+      uniqueQuestions = filterValid(merged)
+    }
     // validate the deduped set
     if (uniqueQuestions.length > 0) {
       const validation = validateQuestionsList(uniqueQuestions, language, role)
@@ -203,9 +289,12 @@ app.post('/api/generate-questions', async (req, res) => {
       }
     }
 
-    // If dedupe didn't produce the requested number, but parsed had some questions, return them (best-effort)
-    if ((!parsed || !parsed.questions || parsed.questions.length === 0) && parsed && parsed.questions && parsed.questions.length > 0) {
-      return res.json({ ok: true, data: { questions: parsed.questions.slice(0, count) }, assistant: content })
+    // If dedupe didn't produce any, but the original parsed response had questions, return them (best-effort)
+    if ((!uniqueQuestions || uniqueQuestions.length === 0) && parsed && parsed.questions && parsed.questions.length > 0) {
+      const cleaned = filterValid(parsed.questions).slice(0, count)
+      if (cleaned.length > 0) {
+        return res.json({ ok: true, data: { questions: cleaned }, assistant: content, note: 'returned original parsed questions (cleaned)' })
+      }
     }
 
     // Validation heuristics: ensure questions are tailored to the requested language/role
@@ -218,7 +307,7 @@ app.post('/api/generate-questions', async (req, res) => {
       // conservative set of tokens per language that represent other-language syntax.
       const checks = {
         javascript: ['def ', 'import numpy', 'print(', 'printf(', 'public static', 'system.out', 'std::', '#include', 'cout<<'],
-        python: ['console.log', "console.error", 'var ', 'let ', 'const ', '=>', 'function '],
+        python: ['console.log', "console.error", 'var ', 'let ', 'const ', '=>'],
         java: ['console.log', 'var ', 'let ', 'const ', 'console.error', '=>', 'def '],
         html: ['def ', 'print(', 'public static', 'system.out', 'std::', '#include'],
         sql: ['def ', 'console.log', 'public static', 'function ', 'var ', 'let ', 'const '],
@@ -232,19 +321,54 @@ app.post('/api/generate-questions', async (req, res) => {
       if (!Array.isArray(qs)) return { ok: false, reason: 'not an array' }
       const problems = []
       for (const q of qs) {
-        const combined = (q.question || q.prompt || q.referenceSolution || '').toString()
-        if (containsForeignLanguageText(combined, lang)) {
+        const stem = (q.question || q.prompt || '').toString()
+        const ref = (q.type === 'coding' || q.type === 'code') ? (q.referenceSolution || '') : ''
+        const toCheck = `${stem}\n${ref}`
+        if (containsForeignLanguageText(toCheck, lang)) {
           problems.push({ id: q.id || null, reason: 'contains foreign-language tokens' })
         }
         // role-specific hint: if role is 'database', expect SQL-like tokens
         if (role === 'database') {
-          const t = combined.toLowerCase()
+          const t = toCheck.toLowerCase()
           if (!(/select\b|insert\b|update\b|delete\b|join\b|primary key|foreign key/.test(t))) {
             // may still be fine (the question could be conceptual) - only flag if it's clearly code in another language
           }
         }
       }
       return { ok: problems.length === 0, problems }
+    }
+
+    async function rewriteQuestionsToLanguage(qs, lang, role, framework) {
+      const instructions = `Convert the following JSON questions to target language: ${lang}${role ? `, role: ${role}` : ''}${framework ? `, framework: ${framework}` : ''}.
+Rules:
+- Keep the array length and ids the same.
+- Preserve the JSON schema exactly. For MCQ, keep correctIndex pointing to the correct option.
+- Question stems and correct answers must be in ${lang}. Wrong options can reference other languages but keep it minimal.
+- For coding, rewrite prompt and referenceSolution to ${lang}. Output JSON only with {"questions":[...]} and nothing else.`
+      const body = {
+        model: DEFAULT_MODEL,
+        messages: [
+          { role: 'system', content: 'You strictly transform JSON according to instructions. Output JSON only.' },
+          { role: 'user', content: instructions },
+          { role: 'assistant', content: JSON.stringify({ questions: qs }) },
+        ],
+        temperature: 0.2,
+        max_tokens: 1800,
+      }
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify(body),
+      })
+      if (!r.ok) return null
+      const data = await r.json()
+      const content = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : null
+      try {
+        const parsed = JSON.parse(content)
+        return parsed && Array.isArray(parsed.questions) ? parsed.questions : null
+      } catch {
+        return null
+      }
     }
 
     if (parsed && parsed.questions) {
@@ -278,6 +402,18 @@ app.post('/api/generate-questions', async (req, res) => {
             const validation2 = parsed2 && parsed2.questions ? validateQuestionsList(parsed2.questions, language, role) : { ok: false, reason: 'no questions' }
             if (!validation2.ok) {
               console.warn('Corrective retry still failed validation:', validation2)
+              // attempt rewrite to the requested language to salvage result
+              try {
+                const rewritten = await rewriteQuestionsToLanguage(parsed2.questions || [], language, role, framework)
+                if (rewritten && rewritten.length) {
+                  const validation3 = validateQuestionsList(rewritten, language, role)
+                  if (validation3.ok) {
+                    return res.json({ ok: true, data: { questions: rewritten.slice(0, count) }, assistant: content2, note: 'questions auto-rewritten to requested language' })
+                  }
+                }
+              } catch (ee) {
+                console.warn('Rewrite attempt failed', ee)
+              }
               return res.status(422).json({ ok: false, error: 'ai_response_not_in_language', reason: validation2, assistant: content2, data: parsed2 })
             }
             return res.json({ ok: true, data: parsed2, assistant: content2 })

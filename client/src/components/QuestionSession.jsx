@@ -24,6 +24,11 @@ function MCQ({ q, value, onChange }) {
 
 function CodeQuestion({ q, value, onChange }) {
   const prompt = q.prompt || q.question || ''
+  const handleKeyDown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+      e.preventDefault()
+    }
+  }
   return (
     <div style={{ border: '1px solid rgba(255,255,255,0.06)', padding: 8, marginBottom: 8, background: 'var(--surface)', color: 'var(--text)', borderRadius: 6 }}>
       <div><strong>{prompt}</strong></div>
@@ -31,6 +36,13 @@ function CodeQuestion({ q, value, onChange }) {
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
         rows={10}
+        onPaste={(e) => e.preventDefault()}
+        onDrop={(e) => e.preventDefault()}
+        onKeyDown={handleKeyDown}
+        onContextMenu={(e) => e.preventDefault()}
+        spellCheck={false}
+        autoComplete="off"
+        aria-label="Coding answer (pasting disabled)"
         style={{ width: '100%', fontFamily: 'monospace', background: 'var(--muted-surface)', color: 'var(--text)', border: '1px solid rgba(255,255,255,0.04)', padding: 8, borderRadius: 4 }}
       />
     </div>
@@ -126,6 +138,9 @@ export default function QuestionSession({ session = { questions: [] }, onFinish,
   return (
     <div style={{ padding: 20 }}>
       <h2>Interview Session</h2>
+      <div style={{ color: 'var(--muted)', marginBottom: 8 }}>
+        Scoring: MCQs = 1 point each; Coding tasks = 5 points each.
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ color: 'var(--muted)' }}>{questions.length} question{questions.length !== 1 ? 's' : ''}</div>
         <div style={{ fontWeight: 700, color: remaining <= 60 ? 'var(--danger)' : 'var(--text)', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: 8 }}>

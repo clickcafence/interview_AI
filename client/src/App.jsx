@@ -35,37 +35,35 @@ function App() {
     }
   }
 
-  function handleFinish(answers) {
-    // For coding answers, optionally call AI grader and attach feedback before showing results
-    (async () => {
-      try {
-        const s = session
-        const questions = s.questions || []
-        const updatedAnswers = answers || []
-        // find coding questions and grade them
-        for (const q of questions) {
-          if (q.type === 'coding' || q.type === 'code') {
-            const userCode = (answers || []).find((a) => a.id === q.id)?.answer
-            if (userCode) {
-              try {
-                const grade = await gradeCoding(q, userCode)
-                // attach grade into answers list as metadata
-                const idx = updatedAnswers.findIndex((a) => a.id === q.id)
-                if (idx !== -1) updatedAnswers[idx] = { ...updatedAnswers[idx], grade }
-              } catch (e) {
-                console.warn('grading failed for question', q.id, e)
-              }
+  async function handleFinish(answers) {
+    // For coding answers, call AI grader and attach feedback before showing results
+    try {
+      const s = session
+      const questions = s?.questions || []
+      const updatedAnswers = Array.isArray(answers) ? [...answers] : []
+      // find coding questions and grade them
+      for (const q of questions) {
+        if (q.type === 'coding' || q.type === 'code') {
+          const userCode = (answers || []).find((a) => a.id === q.id)?.answer
+          if (userCode) {
+            try {
+              const grade = await gradeCoding(q, userCode)
+              // attach grade into answers list as metadata
+              const idx = updatedAnswers.findIndex((a) => a.id === q.id)
+              if (idx !== -1) updatedAnswers[idx] = { ...updatedAnswers[idx], grade }
+            } catch (e) {
+              console.warn('grading failed for question', q.id, e)
             }
           }
         }
-        setSession((s) => ({ ...s, answers: updatedAnswers }))
-        setScreen('result')
-      } catch (e) {
-        console.error('Error while grading coding answers', e)
-        setSession((s) => ({ ...s, answers }))
-        setScreen('result')
       }
-    })()
+      setSession((s) => ({ ...s, answers: updatedAnswers }))
+      setScreen('result')
+    } catch (e) {
+      console.error('Error while grading coding answers', e)
+      setSession((s) => ({ ...s, answers }))
+      setScreen('result')
+    }
   }
 
   function handleRestart() {
